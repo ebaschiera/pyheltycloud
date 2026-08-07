@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pyheltycloud"
+version = "0.1.0"
+description = "Async client for the Helty cloud (hcloud) of Helty Flow VMC units"
+readme = "README.md"
+requires-python = ">=3.12"
+license = "MIT"
+authors = [{ name = "Ermanno Baschiera" }]
+keywords = ["helty", "vmc", "hrv", "home-assistant"]
+dependencies = ["aiohttp>=3.9"]
+
+[project.urls]
+Homepage = "https://github.com/ebaschiera/pyheltycloud"
+
+[dependency-groups]
+dev = ["pytest", "pytest-asyncio", "pytest-cov", "ruff", "mypy"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+pyheltycloud = ["py.typed"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "UP", "B", "SIM", "RUF", "D"]
+ignore = ["D203", "D213"]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests are documented by their name; docstrings only where the "why" needs explaining.
+"tests/*" = ["D100", "D101", "D102", "D103", "D104"]
+
+[tool.mypy]
+strict = true
+packages = ["pyheltycloud"]

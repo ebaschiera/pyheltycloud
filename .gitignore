@@ -1,0 +1,13 @@
+# Exploratory scripts from the reverse-engineering phase: not part of the library.
+research/
+
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+dist/
+*.egg-info/
+*.swp
