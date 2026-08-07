@@ -52,6 +52,11 @@ class Command(IntEnum):
     HYPERVENTILATION = 23
     SPEED_STEP_UP = 24
     GET_PARAMETERS = 33
+    # The app groups 38/39 as "auto_group" (the "Auto" toggle, likely
+    # EnableSensor on/off). The feature appears non-functional: no state
+    # change is observable in telemetry, parameters, or machine behavior.
+    AUTO_ON = 38
+    AUTO_OFF = 39
     LIGHT_OFF = 40  # observed when turning the panel light off; args unverified
     SET_LIGHT = 41  # observed when turning the light on / setting the level
     SPEED_1 = 44
