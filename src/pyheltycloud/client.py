@@ -252,10 +252,7 @@ class HeltyCloud:
 
     async def set_mode(self, board_serial: str, mode: VmcMode) -> None:
         """Set the VMC mode. Single send, no verification."""
-        command = MODE_COMMANDS.get(mode)
-        if command is None:
-            raise HeltyCloudError(f"Mode {mode.name} has no known command on the cloud")
-        await self.send_command(board_serial, command)
+        await self.send_command(board_serial, MODE_COMMANDS[mode])
 
     async def set_mode_verified(
         self, device: HeltyDevice, mode: VmcMode, attempts: int = 3

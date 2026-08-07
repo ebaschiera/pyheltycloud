@@ -130,11 +130,20 @@ async def test_set_mode(client: HeltyCloud, cloud: FakeCloud) -> None:
     assert cloud.last(SEND_PATH).json["commandId"] == Command.NIGHT
 
 
-@pytest.mark.parametrize("mode", [VmcMode.OFF, VmcMode.FREE_COOLING])
-async def test_set_mode_unsupported(client: HeltyCloud, mode: VmcMode) -> None:
-    """For these modes we do not know the commandId yet."""
-    with pytest.raises(HeltyCloudError, match=mode.name):
-        await client.set_mode(BOARD_SERIAL, mode)
+@pytest.mark.parametrize(
+    ("mode", "command"),
+    [
+        (VmcMode.OFF, Command.OFF),
+        (VmcMode.SPEED_2, Command.SPEED_2),
+        (VmcMode.FREE_COOLING, Command.FREE_COOLING),
+    ],
+)
+async def test_set_mode_covers_every_mode(
+    client: HeltyCloud, cloud: FakeCloud, mode: VmcMode, command: Command
+) -> None:
+    """All modes map to a commandId, including off and free cooling."""
+    await client.set_mode(BOARD_SERIAL, mode)
+    assert cloud.last(SEND_PATH).json["commandId"] == command
 
 
 def _search_reply(timestamp: int, data: list[Any]) -> tuple[int, Any]:

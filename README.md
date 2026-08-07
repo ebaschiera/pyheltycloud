@@ -58,8 +58,8 @@ delivery: in testing roughly one send out of four had no effect. `set_mode()` is
 | | |
 |---|---|
 | Reading | devices, mode, indoor and outdoor temperature, humidity, both fan percentages, alarm bitmap |
-| Writing | speeds 1-4, night mode, hyperventilation (also with verification and retries), report request |
-| Not mapped yet | power off and free cooling (no known `commandId`), panel light, filter hours |
+| Writing | all modes — off, speeds 1-4, night, hyperventilation, free cooling — (also with verification and retries), report request |
+| Not mapped yet | panel light (on/off `commandId`s observed but argument format unverified), filter hours |
 
 ## Development
 

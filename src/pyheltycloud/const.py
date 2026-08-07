@@ -46,27 +46,31 @@ class Command(IntEnum):
 
     GET_STATUS = 0
     GET_INFO = 1
+    OFF = 20
+    FREE_COOLING = 21
     NIGHT = 22
     HYPERVENTILATION = 23
     SPEED_STEP_UP = 24
     GET_PARAMETERS = 33
-    SET_LIGHT = 41
+    LIGHT_OFF = 40  # observed when turning the panel light off; args unverified
+    SET_LIGHT = 41  # observed when turning the light on / setting the level
     SPEED_1 = 44
-    SPEED_2 = 45  # inferred from the sequence: 44/46/47 are observed
+    SPEED_2 = 45
     SPEED_3 = 46
     SPEED_4 = 47
-    GET_LIGHT = 48
+    GET_LIGHT = 48  # answers with [level]; the stored level, not the on/off state
 
 
-#: Modes that can be set directly. OFF and FREE_COOLING have no known
-#: commandId yet, so they are left out.
+#: Command that sets each mode. All modes are covered.
 MODE_COMMANDS: dict[VmcMode, Command] = {
+    VmcMode.OFF: Command.OFF,
     VmcMode.SPEED_1: Command.SPEED_1,
     VmcMode.SPEED_2: Command.SPEED_2,
     VmcMode.SPEED_3: Command.SPEED_3,
     VmcMode.SPEED_4: Command.SPEED_4,
     VmcMode.HYPERVENTILATION: Command.HYPERVENTILATION,
     VmcMode.NIGHT: Command.NIGHT,
+    VmcMode.FREE_COOLING: Command.FREE_COOLING,
 }
 
 # Positions in the telemetry payload of Command.GET_STATUS.
