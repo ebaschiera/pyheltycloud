@@ -70,7 +70,7 @@ for callers that would rather pay a round trip than miss a command.
 |---|---|
 | Reading | devices, mode, indoor and outdoor temperature, humidity, both fan percentages, alarm bitmap |
 | Writing | all modes (off, speeds 1-4, night, hyperventilation, free cooling), optionally with verification and retries; report request |
-| Not mapped yet | panel light: the on/off `commandId`s are known, the argument format is not |
+| Not mapped yet | the panel brightness: 40 and 41 switch the whole panel off and on, but the API refuses every argument shape tried for setting a level, and nothing reports whether the panel is lit |
 | Not available | the filter counter — the firmware counts cubic metres of treated air, and the cloud does not expose it |
 
 ## Development

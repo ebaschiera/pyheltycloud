@@ -250,21 +250,19 @@ class HeltyCloud:
 
     # -- writing -----------------------------------------------------------
 
-    async def send_command(
-        self,
-        board_serial: str,
-        command: Command,
-        value: str | int | None = None,
-    ) -> None:
-        """Send a command to the board.
+    async def send_command(self, board_serial: str, command: Command) -> None:
+        """Send an argument-less command to the board.
 
         The cloud answers 200 as soon as it takes the command, before the
         board has acted on it, and the answer says nothing about delivery.
         Callers who need certainty should read the state back.
+
+        Commands that carry an argument are not supported: "values" has to
+        hold objects with "id" and "value" (the keys are in the app's own
+        code), but every combination tried against the live API was refused
+        with 400 "Malformed Command", so the right contents are unknown.
         """
         body: dict[str, Any] = {"commandId": int(command), "values": []}
-        if value is not None:
-            body["values"] = [{"id": str(int(command)), "value": str(value)}]
         await self._post(EP_SEND_COMMAND.format(board_serial=board_serial), body)
 
     async def refresh(self, board_serial: str) -> None:

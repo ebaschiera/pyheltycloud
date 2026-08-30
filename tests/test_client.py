@@ -127,11 +127,6 @@ async def test_send_command_shape(client: HeltyCloud, cloud: FakeCloud) -> None:
     assert cloud.last(SEND_PATH).json == {"commandId": 0, "values": []}
 
 
-async def test_send_command_with_value(client: HeltyCloud, cloud: FakeCloud) -> None:
-    await client.send_command(BOARD_SERIAL, Command.SET_LIGHT, 100)
-    assert cloud.last(SEND_PATH).json["values"] == [{"id": "41", "value": "100"}]
-
-
 async def test_set_mode(client: HeltyCloud, cloud: FakeCloud) -> None:
     await client.set_mode(BOARD_SERIAL, VmcMode.NIGHT)
     assert cloud.last(SEND_PATH).json["commandId"] == Command.NIGHT

@@ -61,13 +61,18 @@ class Command(IntEnum):
     # is above 65%, so on a unit with humidity only nothing happens in summer.
     AUTO_ON = 38
     AUTO_OFF = 39
-    LIGHT_OFF = 40  # observed when turning the panel light off; args unverified
-    SET_LIGHT = 41  # observed when turning the light on / setting the level
+    # Verified live: 40 switches the whole panel off, display and speed LEDs
+    # together, and 41 switches it back on. Neither takes an argument, and
+    # nothing in the telemetry reflects which of the two is in force.
+    PANEL_OFF = 40
+    PANEL_ON = 41
     SPEED_1 = 44
     SPEED_2 = 45
     SPEED_3 = 46
     SPEED_4 = 47
-    GET_LIGHT = 48  # answers with [level]; the stored level, not the on/off state
+    # Answers with [level]: the stored brightness, not whether the panel is
+    # lit. It reads 100 with the panel dark.
+    GET_PANEL_LEVEL = 48
 
 
 #: Command that sets each mode. All modes are covered.
