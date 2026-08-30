@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from types import TracebackType
@@ -140,17 +141,27 @@ class HeltyCloud:
             async with session.post(
                 API_BASE + path, headers=headers, json=payload, timeout=TIMEOUT
             ) as response:
-                if response.status == 401:
-                    raise HeltyCloudAuthError(await response.text())
-                if response.status == 404 and allow_404:
-                    return None
-                if response.status >= 400:
-                    raise HeltyCloudError(
-                        f"HTTP {response.status} on {path}: {(await response.text())[:200]}"
-                    )
-                return await response.json(content_type=None)
+                status = response.status
+                text = await response.text()
         except (TimeoutError, aiohttp.ClientError) as err:
             raise HeltyCloudConnectionError(f"{path}: {err}") from err
+
+        if status == 401:
+            raise HeltyCloudAuthError(text)
+        if status == 404 and allow_404:
+            return None
+        if status >= 400:
+            raise HeltyCloudError(f"HTTP {status} on {path}: {text[:200]}")
+
+        # nginx sits in front of the API and answers with its own HTML pages,
+        # so a 200 is not a promise of JSON. Parsing here keeps a ValueError
+        # from escaping past the exceptions this library documents.
+        try:
+            return json.loads(text)
+        except ValueError as err:
+            raise HeltyCloudConnectionError(
+                f"{path}: the cloud answered HTTP {status} with a non-JSON body: {text[:200]}"
+            ) from err
 
     # -- reading -----------------------------------------------------------
 
@@ -185,11 +196,20 @@ class HeltyCloud:
                 "toTs": now,
             },
         )
-        for row in page.get("data", []):
-            data = row.get("data") or []
-            if row.get("commandId") == Command.GET_STATUS and is_telemetry(data):
-                return HeltyState.from_telemetry(data, row.get("timestamp"))
-        raise HeltyCloudNoDataError(f"No telemetry for {serial_number} in the last {hours} hours")
+        rows = [
+            row
+            for row in page.get("data", [])
+            if row.get("commandId") == Command.GET_STATUS and is_telemetry(row.get("data") or [])
+        ]
+        if not rows:
+            raise HeltyCloudNoDataError(
+                f"No telemetry for {serial_number} in the last {hours} hours"
+            )
+        # The cloud happens to return the newest first, but nothing documents
+        # it, and update() decides whether the board answered by comparing
+        # timestamps: pick the newest explicitly.
+        newest = max(rows, key=lambda row: row.get("timestamp") or 0)
+        return HeltyState.from_telemetry(newest["data"], newest.get("timestamp"))
 
     async def update(self, device: HeltyDevice) -> HeltyState:
         """Fetch the current state: ask the board to report, then read.

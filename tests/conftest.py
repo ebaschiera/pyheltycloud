@@ -37,6 +37,14 @@ class Recorded:
 
 
 @dataclass
+class Raw:
+    """A body that is not JSON, like the error page of a proxy."""
+
+    text: str
+    content_type: str = "text/html"
+
+
+@dataclass
 class FakeCloud:
     """Fake backend: programmable responses and recorded requests."""
 
@@ -67,6 +75,8 @@ class FakeCloud:
             status, payload = entry.pop(0) if entry else (200, {})
         else:
             status, payload = entry
+        if isinstance(payload, Raw):
+            return web.Response(text=payload.text, status=status, content_type=payload.content_type)
         return web.json_response(payload, status=status)
 
 

@@ -16,9 +16,16 @@ from pyheltycloud import (
     HeltyCloudNoDataError,
     VmcMode,
 )
-from pyheltycloud.const import EP_INSTALLATIONS, EP_LAST_STATUS
+from pyheltycloud.const import EP_COMMAND_LOGS, EP_INSTALLATIONS, EP_LAST_STATUS
 
-from .conftest import BOARD_SERIAL, COGNITO_PATH, SERIAL, FakeCloud, srp_login_replies
+from .conftest import (
+    BOARD_SERIAL,
+    COGNITO_PATH,
+    SERIAL,
+    FakeCloud,
+    Raw,
+    srp_login_replies,
+)
 
 SEND_PATH = f"/board/board/sendcommand/{BOARD_SERIAL}"
 
@@ -331,3 +338,30 @@ async def test_explicit_login(cloud: FakeCloud, client: HeltyCloud) -> None:
     cloud.reply_sequence(COGNITO_PATH, srp_login_replies("login-id"))
     await client.login()
     assert client._tokens is not None and client._tokens.id_token == "login-id"
+
+
+async def test_non_json_body_is_a_connection_error(client: HeltyCloud, cloud: FakeCloud) -> None:
+    """An HTML page from the proxy must not escape as a ValueError."""
+    cloud.reply(EP_INSTALLATIONS, Raw("<html>502 Bad Gateway</html>"))
+    with pytest.raises(HeltyCloudConnectionError, match="non-JSON"):
+        await client.get_devices()
+
+
+async def test_last_telemetry_picks_the_newest(
+    client: HeltyCloud, cloud: FakeCloud, telemetry: list[Any]
+) -> None:
+    """The newest row wins even if the cloud stops sorting the history."""
+    older = list(telemetry)
+    older[1] = int(VmcMode.SPEED_1)
+    cloud.reply(
+        EP_COMMAND_LOGS,
+        {
+            "data": [
+                {"commandId": 0, "timestamp": 1000, "data": older},
+                {"commandId": 0, "timestamp": 9000, "data": telemetry},
+            ]
+        },
+    )
+    state = await client.get_last_telemetry(SERIAL)
+    assert state.timestamp == 9000
+    assert state.mode is VmcMode.NIGHT

@@ -15,6 +15,7 @@ import base64
 import binascii
 import hashlib
 import hmac
+import json
 import os
 import time
 from dataclasses import dataclass
@@ -129,7 +130,7 @@ class CognitoSrpAuth:
         client_id: str,
         region: str,
     ) -> None:
-        """Prepare the SRP parameters: the ephemeral secret is generated once."""
+        """Prepare the fixed SRP parameters of the pool."""
         self._session = session
         self._user_pool_id = user_pool_id
         self._client_id = client_id
@@ -137,6 +138,14 @@ class CognitoSrpAuth:
         self._big_n = int(N_HEX, 16)
         self._g = int(G_HEX, 16)
         self._k = int(_hex_hash(f"00{N_HEX}0{G_HEX}"), 16)
+        self._new_ephemeral()
+
+    def _new_ephemeral(self) -> None:
+        """Draw a fresh SRP secret and its public value.
+
+        One per login: reusing the pair across authentications is outside
+        what the protocol assumes of the ephemeral keys.
+        """
         self._small_a = int(binascii.hexlify(os.urandom(128)), 16) % self._big_n
         self._big_a = pow(self._g, self._small_a, self._big_n)
 
@@ -154,13 +163,27 @@ class CognitoSrpAuth:
             async with self._session.post(
                 self._url, headers=headers, json=payload, timeout=_TIMEOUT
             ) as response:
-                body: dict[str, Any] = await response.json(content_type=None)
-                if response.status != 200:
-                    message = body.get("message") or body.get("__type") or str(body)
-                    raise HeltyCloudAuthError(f"{target}: {message}")
-                return body
+                status = response.status
+                text = await response.text()
         except (TimeoutError, aiohttp.ClientError) as err:
             raise HeltyCloudConnectionError(f"Cognito is unreachable: {err}") from err
+
+        # A proxy in front of Cognito answers with its own HTML error page,
+        # which json() would blow up on with a ValueError: not one of ours,
+        # and callers only guard against HeltyCloudError.
+        try:
+            body = json.loads(text)
+        except ValueError as err:
+            raise HeltyCloudConnectionError(
+                f"{target}: Cognito answered HTTP {status} with a non-JSON body: {text[:200]}"
+            ) from err
+        if not isinstance(body, dict):
+            raise HeltyCloudConnectionError(f"{target}: unexpected answer {text[:200]}")
+
+        if status != 200:
+            message = body.get("message") or body.get("__type") or str(body)
+            raise HeltyCloudAuthError(f"{target}: {message}")
+        return body
 
     def _password_key(self, username: str, password: str, srp_b_hex: str, salt_hex: str) -> bytes:
         big_b = int(srp_b_hex, 16)
@@ -185,6 +208,7 @@ class CognitoSrpAuth:
 
     async def authenticate(self, username: str, password: str) -> Tokens:
         """Run the full SRP login."""
+        self._new_ephemeral()
         init = await self._call(
             "InitiateAuth",
             {

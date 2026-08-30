@@ -16,7 +16,7 @@ import pytest
 from pyheltycloud.auth import CognitoSrpAuth
 from pyheltycloud.exceptions import HeltyCloudAuthError, HeltyCloudConnectionError
 
-from .conftest import COGNITO_PATH, FakeCloud
+from .conftest import COGNITO_PATH, FakeCloud, Raw
 
 # Plausible challenge values: they need not be real, only well-formed.
 SRP_B = "a3f" + "1" * 100
@@ -132,3 +132,41 @@ async def test_unreachable_cognito(auth: CognitoSrpAuth) -> None:
     auth._url = "http://127.0.0.1:1/"
     with pytest.raises(HeltyCloudConnectionError):
         await auth.authenticate("user@example.com", "secret")
+
+
+async def test_non_json_answer_is_a_connection_error(cloud: FakeCloud) -> None:
+    """A proxy page in front of Cognito must not surface as a ValueError."""
+    cloud.reply(COGNITO_PATH, Raw("<html>503 Service Unavailable</html>"), status=503)
+    async with aiohttp.ClientSession() as session:
+        auth = CognitoSrpAuth(session, "eu-central-1_pool", "client-id", "eu-central-1")
+        auth._url = f"{cloud.base_url.rstrip('/')}{COGNITO_PATH}"  # type: ignore[attr-defined]
+        with pytest.raises(HeltyCloudConnectionError, match="non-JSON"):
+            await auth.authenticate("user@example.com", "secret")
+
+
+async def test_each_login_draws_a_new_ephemeral(cloud: FakeCloud) -> None:
+    """SRP wants a fresh secret per login, not one per client."""
+    async with aiohttp.ClientSession() as session:
+        auth = CognitoSrpAuth(session, "eu-central-1_pool", "client-id", "eu-central-1")
+        auth._url = f"{cloud.base_url.rstrip('/')}{COGNITO_PATH}"  # type: ignore[attr-defined]
+
+        cloud.reply_sequence(COGNITO_PATH, [(200, CHALLENGE), (200, TOKENS)])
+        await auth.authenticate("user@example.com", "secret")
+        first = cloud.requests[0].json["AuthParameters"]["SRP_A"]
+
+        cloud.requests.clear()
+        cloud.reply_sequence(COGNITO_PATH, [(200, CHALLENGE), (200, TOKENS)])
+        await auth.authenticate("user@example.com", "secret")
+        second = cloud.requests[0].json["AuthParameters"]["SRP_A"]
+
+    assert first != second
+
+
+async def test_json_that_is_not_an_object_is_a_connection_error(cloud: FakeCloud) -> None:
+    """Valid JSON is not enough: the answer has to be an object."""
+    cloud.reply(COGNITO_PATH, Raw('"nope"', content_type="application/json"))
+    async with aiohttp.ClientSession() as session:
+        auth = CognitoSrpAuth(session, "eu-central-1_pool", "client-id", "eu-central-1")
+        auth._url = f"{cloud.base_url.rstrip('/')}{COGNITO_PATH}"  # type: ignore[attr-defined]
+        with pytest.raises(HeltyCloudConnectionError, match="unexpected answer"):
+            await auth.authenticate("user@example.com", "secret")
