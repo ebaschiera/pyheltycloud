@@ -52,9 +52,13 @@ class Command(IntEnum):
     HYPERVENTILATION = 23
     SPEED_STEP_UP = 24
     GET_PARAMETERS = 33
-    # The app groups 38/39 as "auto_group" (the "Auto" toggle, likely
-    # EnableSensor on/off). The feature appears non-functional: no state
-    # change is observable in telemetry, parameters, or machine behavior.
+    # The "Auto" toggle of the app ("auto_group" in its command switch).
+    # Write only: the vendor confirmed the commands take effect but that the
+    # setting cannot be read back from anywhere, which is why the app shows
+    # its own local idea of the toggle. In Auto the unit picks the speed from
+    # its humidity, VOC and CO2 sensors, but only while the outdoor
+    # temperature is at least 5 °C below the indoor one and indoor humidity
+    # is above 65%, so on a unit with humidity only nothing happens in summer.
     AUTO_ON = 38
     AUTO_OFF = 39
     LIGHT_OFF = 40  # observed when turning the panel light off; args unverified
