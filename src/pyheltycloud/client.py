@@ -53,8 +53,9 @@ class HeltyCloud:
     """Session towards api.hcloud.heltyair.com.
 
     The cloud keeps no device state: it returns the last message received
-    from the board. To get current data the board must be asked to report
-    (refresh()), otherwise you read whatever is there.
+    from the board, which pushes over its own AWS IoT connection. To get
+    current data the board must be asked to report (refresh()), otherwise
+    you read whatever is there.
     """
 
     def __init__(
@@ -237,9 +238,9 @@ class HeltyCloud:
     ) -> None:
         """Send a command to the board.
 
-        The cloud accepts the command but does not guarantee delivery: in
-        testing roughly one send out of four had no effect. Callers should
-        re-read the state and retry if needed.
+        The cloud answers 200 as soon as it takes the command, before the
+        board has acted on it, and the answer says nothing about delivery.
+        Callers who need certainty should read the state back.
         """
         body: dict[str, Any] = {"commandId": int(command), "values": []}
         if value is not None:

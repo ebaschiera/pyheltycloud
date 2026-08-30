@@ -38,6 +38,17 @@ async def main() -> None:
 asyncio.run(main())
 ```
 
+## How it works
+
+Two separate channels. The panel runs no server: it holds an outbound connection to **AWS IoT Core**
+(eu-central-1), and Helty's backend relays to it. Clients never reach the panel directly — the app
+and this library call the REST API at `api.hcloud.heltyair.com`, authenticating against an **AWS
+Cognito** user pool with the account's own email and password (SRP, nothing to provision).
+
+That shape explains both surprises below: a read returns the last message the panel pushed, not the
+machine's current state, and a write is a message handed to the relay, so a `200` only means the
+backend took it.
+
 ## Things to know before using it
 
 **The board rarely speaks.** With the app closed it sends telemetry roughly every half hour, so
@@ -46,9 +57,9 @@ current data the board must be asked to report: `refresh()` does that, and `upda
 you — it waits up to ~15 seconds for the answer and, if none arrives, falls back to the last known
 data.
 
-**Commands can get lost.** The cloud accepts the request and answers `200` without guaranteeing
-delivery: in testing roughly one send out of four had no effect. `set_mode()` is a single send;
-`set_mode_verified()` re-reads the state and retries until the mode is applied.
+**Commands are acknowledged, not guaranteed.** The cloud answers `200` before the board has done
+anything. `set_mode()` is a single send; `set_mode_verified()` re-reads the state and retries,
+for callers that would rather pay a round trip than miss a command.
 
 **Two different serials.** Reads use `device.serial_number` (the machine), writes use
 `device.board_serial` (the board). They are not interchangeable.
@@ -58,16 +69,17 @@ delivery: in testing roughly one send out of four had no effect. `set_mode()` is
 | | |
 |---|---|
 | Reading | devices, mode, indoor and outdoor temperature, humidity, both fan percentages, alarm bitmap |
-| Writing | all modes — off, speeds 1-4, night, hyperventilation, free cooling — (also with verification and retries), report request |
-| Not mapped yet | panel light (on/off `commandId`s observed but argument format unverified), filter hours |
+| Writing | all modes (off, speeds 1-4, night, hyperventilation, free cooling), optionally with verification and retries; report request |
+| Not mapped yet | panel light: the on/off `commandId`s are known, the argument format is not |
+| Not available | the filter counter — the firmware counts cubic metres of treated air, and the cloud does not expose it |
 
 ## Development
 
 ```bash
-pip install -e ".[dev]"
-pytest --cov=pyheltycloud
-ruff check src tests && ruff format --check src tests
-mypy
+uv sync --group dev
+uv run pytest --cov=pyheltycloud
+uv run ruff check src tests && uv run ruff format --check src tests
+uv run mypy
 ```
 
 Tests never touch the network: they use a fake local HTTP backend.
