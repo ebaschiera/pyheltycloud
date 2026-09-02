@@ -68,10 +68,11 @@ for callers that would rather pay a round trip than miss a command.
 
 | | |
 |---|---|
-| Reading | devices, mode, indoor and outdoor temperature, humidity, both fan percentages, alarm bitmap |
+| Reading | devices, mode, indoor and outdoor temperature, humidity, both fan percentages, alarm bitmap, the two counters of treated air |
 | Writing | all modes (off, speeds 1-4, night, hyperventilation, free cooling), optionally with verification and retries; report request |
 | Not mapped yet | the panel brightness: 40 and 41 switch the whole panel off and on, but the API refuses every argument shape tried for setting a level, and nothing reports whether the panel is lit |
-| Not available | the filter counter — the firmware counts cubic metres of treated air, and the cloud does not expose it |
+| Not mapped yet | the filter reset: the vendor gives command 37, unverified, and sending it would destroy the only record of how old the filter is |
+| Not available | the alarm threshold of the filter — 90000 m³ on the current firmware, by the vendor's word, and in none of the values the board reports |
 
 ## Development
 

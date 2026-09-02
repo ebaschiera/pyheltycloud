@@ -6,9 +6,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
+    FILTER_M3_PER_COUNT,
+    FILTER_MIN_LEN,
     IDX_ALARMS,
     IDX_FAN_EXHAUST,
     IDX_FAN_SUPPLY,
+    IDX_FILTER_PARTIAL,
+    IDX_FILTER_TOTAL,
     IDX_HUMIDITY,
     IDX_MODE,
     IDX_TEMP_INDOOR,
@@ -73,6 +77,12 @@ class HeltyState:
     alarms: str | None = None
     """Hex alarm bitmap; "0000000000000000" means no alarms."""
 
+    filter_partial_m3: int | None = None
+    """Cubic metres treated since the last filter reset."""
+
+    filter_total_m3: int | None = None
+    """Cubic metres treated over the life of the machine."""
+
     timestamp: int | None = None
     """Epoch milliseconds of the message this state derives from."""
 
@@ -123,12 +133,26 @@ class HeltyState:
             fan_exhaust=int(data[IDX_FAN_EXHAUST]),
             alarms=str(data[IDX_ALARMS]),
             timestamp=timestamp,
+            filter_partial_m3=_counter(data, IDX_FILTER_PARTIAL),
+            filter_total_m3=_counter(data, IDX_FILTER_TOTAL),
         )
 
 
 def is_telemetry(data: list[Any]) -> bool:
     """Return True when the payload is a full telemetry and not an empty ack."""
     return len(data) >= TELEMETRY_MIN_LEN
+
+
+def _counter(data: list[Any], index: int) -> int | None:
+    """Read a filter counter and convert it to cubic metres.
+
+    Short payloads have no counters, and a zero is not trusted: for the first
+    day it was online this panel returned telemetry with a whole block of
+    fields zeroed, the counters among them, while the machine was running.
+    """
+    if len(data) < FILTER_MIN_LEN or not data[index]:
+        return None
+    return int(data[index]) * FILTER_M3_PER_COUNT
 
 
 def _scaled(value: float | None) -> float | None:

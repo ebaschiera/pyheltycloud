@@ -52,6 +52,11 @@ class Command(IntEnum):
     HYPERVENTILATION = 23
     SPEED_STEP_UP = 24
     GET_PARAMETERS = 33
+    # Zeroes the partial filter counter after a filter change. Given by the
+    # vendor, who is not certain of it either ("dovrebbe essere il 37"), and
+    # never sent: trying it would destroy the only record of how old the
+    # filter is.
+    RESET_FILTER = 37
     # The "Auto" toggle of the app ("auto_group" in its command switch).
     # Write only: the vendor confirmed the commands take effect but that the
     # setting cannot be read back from anywhere, which is why the app shows
@@ -96,6 +101,26 @@ IDX_FAN_SUPPLY = 4
 IDX_FAN_EXHAUST = 5
 IDX_HUMIDITY = 10
 TELEMETRY_MIN_LEN = IDX_HUMIDITY + 1
+
+# The two counters of treated air. The vendor confirmed that 16 is the
+# partial one, zeroed by the filter reset, and that 18 is the lifetime one:
+# their difference is constant and is what the machine had treated when the
+# filter was last changed.
+IDX_FILTER_PARTIAL = 16
+IDX_FILTER_TOTAL = 18
+FILTER_MIN_LEN = IDX_FILTER_TOTAL + 1
+
+#: Cubic metres per count. The vendor wrote "10e-1 mc", but the measured
+#: rates only make sense at ten: over 475 hours at speed 1 the counter grew
+#: 0.73 per hour, that is 7.3 m3/h, while a tenth of a cubic metre per count
+#: would mean 0.073 m3/h out of a machine rated for tens.
+FILTER_M3_PER_COUNT = 10
+
+#: Cubic metres after which the panel shows the filter alarm. The vendor
+#: gives this for the current firmware and warns that it can change with
+#: later ones, and it is in none of the 27 values of GET_PARAMETERS: it is a
+#: default to start from, not a reading.
+FILTER_ALARM_M3 = 90_000
 
 # EP_LAST_STATUS fields and the corresponding HeltyState attribute.
 LAST_STATUS_MAP = {

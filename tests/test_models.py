@@ -7,7 +7,7 @@ from typing import Any
 import pytest
 
 from pyheltycloud import HeltyCloudNoDataError, HeltyDevice, HeltyState, VmcMode
-from pyheltycloud.const import IDX_HUMIDITY
+from pyheltycloud.const import IDX_FILTER_PARTIAL, IDX_FILTER_TOTAL, IDX_HUMIDITY
 from pyheltycloud.models import is_telemetry
 
 
@@ -76,6 +76,25 @@ def test_state_from_telemetry(telemetry: list[Any]) -> None:
     assert state.fan_exhaust == 15
     assert state.alarms == "0000000000000000"
     assert state.timestamp == 1786110225000
+    assert state.filter_partial_m3 == 57960
+    assert state.filter_total_m3 == 230870
+
+
+def test_filter_counters_absent_from_short_telemetry(telemetry: list[Any]) -> None:
+    """A payload that stops before the counters must not invent them."""
+    state = HeltyState.from_telemetry(telemetry[:11])
+    assert state.filter_partial_m3 is None
+    assert state.filter_total_m3 is None
+
+
+def test_filter_counters_zero_means_unknown(telemetry: list[Any]) -> None:
+    """Observed live: a whole block of fields comes back zeroed while running."""
+    data = telemetry.copy()
+    data[IDX_FILTER_PARTIAL] = 0
+    data[IDX_FILTER_TOTAL] = 0
+    state = HeltyState.from_telemetry(data)
+    assert state.filter_partial_m3 is None
+    assert state.filter_total_m3 is None
 
 
 def test_is_on() -> None:
