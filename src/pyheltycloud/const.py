@@ -115,8 +115,9 @@ class Command(IntEnum):
     SPEED_2 = 45
     SPEED_3 = 46
     SPEED_4 = 47
-    # Answers with [level]: the stored brightness, not whether the panel is
-    # lit. It reads 100 with the panel dark.
+    # Answers with [level]. The vendor says the level belongs to the lights
+    # of the Elite version, not to this panel, which would explain why it
+    # reads 100 whether the panel is lit or dark.
     GET_PANEL_LEVEL = 48
 
 
@@ -141,6 +142,14 @@ IDX_FAN_SUPPLY = 4
 IDX_FAN_EXHAUST = 5
 IDX_HUMIDITY = 10
 TELEMETRY_MIN_LEN = IDX_HUMIDITY + 1
+
+# Optional sensors, absent on most units: they read 0 when not installed.
+# The vendor calls them "A: anidride CO2" and "I: isobutene VOC" and gives
+# no unit, and this panel has neither, so the values are passed on as they
+# arrive rather than scaled on a guess.
+IDX_CO2 = 14
+IDX_VOC = 15
+SENSOR_MIN_LEN = IDX_VOC + 1
 
 # The two counters of treated air. The vendor confirmed that 16 is the
 # partial one, zeroed by the filter reset, and that 18 is the lifetime one:

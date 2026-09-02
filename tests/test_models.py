@@ -6,8 +6,15 @@ from typing import Any
 
 import pytest
 
-from pyheltycloud import Alarm, HeltyCloudNoDataError, HeltyDevice, HeltyState, VmcMode
-from pyheltycloud.const import IDX_FILTER_PARTIAL, IDX_FILTER_TOTAL, IDX_HUMIDITY
+from pyheltycloud import (
+    Alarm,
+    HeltyCloudError,
+    HeltyCloudNoDataError,
+    HeltyDevice,
+    HeltyState,
+    VmcMode,
+)
+from pyheltycloud.const import IDX_CO2, IDX_FILTER_PARTIAL, IDX_FILTER_TOTAL, IDX_HUMIDITY, IDX_VOC
 from pyheltycloud.models import is_telemetry
 
 
@@ -95,6 +102,33 @@ def test_filter_counters_zero_means_unknown(telemetry: list[Any]) -> None:
     state = HeltyState.from_telemetry(data)
     assert state.filter_partial_m3 is None
     assert state.filter_total_m3 is None
+
+
+def test_air_quality_sensors_absent_read_as_none(telemetry: list[Any]) -> None:
+    """Neither sensor is installed on the unit these payloads come from."""
+    state = HeltyState.from_telemetry(telemetry)
+    assert state.co2 is None
+    assert state.voc is None
+
+
+def test_air_quality_sensors_present(telemetry: list[Any]) -> None:
+    data = telemetry.copy()
+    data[IDX_CO2] = 812
+    data[IDX_VOC] = 145
+    state = HeltyState.from_telemetry(data)
+    # No unit is documented, so the reading is passed on unscaled.
+    assert state.co2 == 812
+    assert state.voc == 145
+
+
+def test_unknown_mode_raises_a_cloud_error(telemetry: list[Any]) -> None:
+    """A mode added by a future firmware must not escape as a ValueError."""
+    data = telemetry.copy()
+    data[1] = 99
+    with pytest.raises(HeltyCloudError):
+        HeltyState.from_telemetry(data)
+    with pytest.raises(HeltyCloudError):
+        HeltyState.from_last_status([{"field": "VMCStatus", "value": 99}])
 
 
 def test_is_on() -> None:

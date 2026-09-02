@@ -45,9 +45,15 @@ REFRESH_POLL_INTERVAL = 2.0
 #: the last available data.
 REFRESH_TIMEOUT = 15.0
 
-#: History search window when reading raw telemetry. Wide, because with the
-#: app closed the board reports roughly every half hour.
-DEFAULT_HISTORY_HOURS = 6
+#: History search window when reading raw telemetry. Measured on 5334
+#: spontaneous reports: the board reports every 5.5 minutes at the median
+#: and every 33 at the 99th percentile, so two hours is wide enough to
+#: always find something without asking the cloud to scan a long window.
+DEFAULT_HISTORY_HOURS = 2
+
+#: Rows to ask for. Only the newest is used; a few spare ones cover the
+#: acks and other commands that share the history.
+HISTORY_PAGE_SIZE = 5
 
 
 class HeltyCloud:
@@ -190,7 +196,7 @@ class HeltyCloud:
             EP_COMMAND_LOGS,
             {
                 "serialNumber": serial_number,
-                "pageSize": 20,
+                "pageSize": HISTORY_PAGE_SIZE,
                 "pageNumber": 0,
                 "fromTs": now - hours * 3600 * 1000,
                 "toTs": now,
@@ -260,7 +266,9 @@ class HeltyCloud:
         Commands that carry an argument are not supported: "values" has to
         hold objects with "id" and "value" (the keys are in the app's own
         code), but every combination tried against the live API was refused
-        with 400 "Malformed Command", so the right contents are unknown.
+        with 400 "Malformed Command". The vendor places the only argument we
+        went looking for, the brightness level, on the lights of the Elite
+        version, so there may be nothing here to support on a FlowPLUS.
         """
         body: dict[str, Any] = {"commandId": int(command), "values": []}
         await self._post(EP_SEND_COMMAND.format(board_serial=board_serial), body)

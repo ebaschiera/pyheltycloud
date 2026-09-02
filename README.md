@@ -51,11 +51,13 @@ backend took it.
 
 ## Things to know before using it
 
-**The board rarely speaks.** With the app closed it sends telemetry roughly every half hour, so
-`get_state()` may raise `HeltyCloudNoDataError` simply because there is nothing recent. To get
-current data the board must be asked to report: `refresh()` does that, and `update()` does it for
-you — it waits up to ~15 seconds for the answer and, if none arrives, falls back to the last known
-data.
+**Read, do not poke.** The board reports on its own every 5.5 minutes at the median and every 33
+at the 99th percentile, measured over 5334 spontaneous reports, because it reports on any
+significant change as well as on its timer. Reading the last message costs one call and the board
+never notices, so a poll should use `get_last_telemetry()`. `refresh()` instead wakes the board,
+and `update()` wakes it and waits up to ~15 seconds for the answer: keep those for right after a
+command, when confirmation is worth the round trip. The vendor asks not to solicit on a short
+timer.
 
 **Commands are acknowledged, not guaranteed.** The cloud answers `200` before the board has done
 anything. `set_mode()` is a single send; `set_mode_verified()` re-reads the state and retries,
@@ -68,10 +70,12 @@ for callers that would rather pay a round trip than miss a command.
 
 | | |
 |---|---|
-| Reading | devices, mode, indoor and outdoor temperature, humidity, both fan percentages, alarms as named flags, the two counters of treated air |
+| Reading | devices, mode, indoor and outdoor temperature, humidity, CO2 and VOC where installed, both fan percentages, alarms as named flags, the two counters of treated air |
 | Writing | all modes (off, speeds 1-4, night, hyperventilation, free cooling), optionally with verification and retries; report request |
-| Not mapped yet | the panel brightness: 40 and 41 switch the whole panel off and on, but the API refuses every argument shape tried for setting a level, and nothing reports whether the panel is lit |
+| Not mapped yet | commands that carry an argument: the API refuses every shape tried. The brightness level, the one argument worth having, belongs to the Elite version's lights, so a FlowPLUS may have nothing here |
 | Not mapped yet | the filter reset: the vendor gives command 37, unverified, and sending it would destroy the only record of how old the filter is |
+| Not available | whether the panel is lit, and whether Auto is on: 40, 41, 38 and 39 take effect, but the vendor states this generation of machines cannot report either state |
+| Not available | the unit of the CO2 and VOC readings, undocumented and untestable on a unit that has neither sensor |
 | Not available | the alarm threshold of the filter — 90000 m³ on the current firmware, by the vendor's word, and in none of the values the board reports |
 
 ## Development
