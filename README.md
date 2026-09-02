@@ -68,7 +68,7 @@ for callers that would rather pay a round trip than miss a command.
 
 | | |
 |---|---|
-| Reading | devices, mode, indoor and outdoor temperature, humidity, both fan percentages, alarm bitmap, the two counters of treated air |
+| Reading | devices, mode, indoor and outdoor temperature, humidity, both fan percentages, alarms as named flags, the two counters of treated air |
 | Writing | all modes (off, speeds 1-4, night, hyperventilation, free cooling), optionally with verification and retries; report request |
 | Not mapped yet | the panel brightness: 40 and 41 switch the whole panel off and on, but the API refuses every argument shape tried for setting a level, and nothing reports whether the panel is lit |
 | Not mapped yet | the filter reset: the vendor gives command 37, unverified, and sending it would destroy the only record of how old the filter is |

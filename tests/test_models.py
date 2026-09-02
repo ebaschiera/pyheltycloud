@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from pyheltycloud import HeltyCloudNoDataError, HeltyDevice, HeltyState, VmcMode
+from pyheltycloud import Alarm, HeltyCloudNoDataError, HeltyDevice, HeltyState, VmcMode
 from pyheltycloud.const import IDX_FILTER_PARTIAL, IDX_FILTER_TOTAL, IDX_HUMIDITY
 from pyheltycloud.models import is_telemetry
 
@@ -108,6 +108,30 @@ def test_has_alarm() -> None:
     assert HeltyState(mode=VmcMode.NIGHT, alarms="0000000000000020").has_alarm
     # Without raw telemetry we know nothing about the alarms.
     assert not HeltyState(mode=VmcMode.NIGHT).has_alarm
+
+
+def test_alarm_flags() -> None:
+    state = HeltyState(mode=VmcMode.NIGHT, alarms="0000000000000021")
+    assert state.alarm_flags is not None
+    assert Alarm.FILTER in state.alarm_flags
+    assert Alarm.ICE_RISK in state.alarm_flags
+    assert Alarm.CO2_OVER_LIMIT not in state.alarm_flags
+    assert HeltyState(mode=VmcMode.NIGHT).alarm_flags is None
+    assert HeltyState(mode=VmcMode.NIGHT, alarms="not hex").alarm_flags is None
+
+
+def test_free_cooling_bit_is_not_a_fault() -> None:
+    """The machine reports automatic free cooling in the alarm bitmap."""
+    state = HeltyState(mode=VmcMode.FREE_COOLING, alarms="0000000000000080")
+    assert state.alarm_flags == Alarm.FREE_COOLING_AUTO
+    assert not state.has_alarm
+
+
+def test_undocumented_bits_are_kept_but_not_faults() -> None:
+    """Observed live: bits 34 and 35 for two seconds while the fans ramped up."""
+    state = HeltyState(mode=VmcMode.SPEED_3, alarms="0000000C00000000")
+    assert state.alarm_flags == Alarm(0xC00000000)
+    assert not state.has_alarm
 
 
 def test_is_telemetry_rejects_command_ack() -> None:

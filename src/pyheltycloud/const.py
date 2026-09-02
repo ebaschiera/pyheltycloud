@@ -6,7 +6,7 @@ verified against the real API. No official documentation exists.
 
 from __future__ import annotations
 
-from enum import IntEnum
+from enum import IntEnum, IntFlag
 
 USER_POOL_ID = "eu-central-1_lejYSlqKZ"
 CLIENT_ID = "7k0c21g92bk3413frij8rso6rk"
@@ -35,6 +35,46 @@ class VmcMode(IntEnum):
     HYPERVENTILATION = 5
     NIGHT = 6
     FREE_COOLING = 7
+
+
+class Alarm(IntFlag):
+    """Bits of the alarm bitmap, from the table the vendor supplied.
+
+    The table stops at bit 8; every higher bit is undocumented. IntFlag
+    keeps unknown bits rather than rejecting them, so the raw value stays
+    readable through the flags.
+    """
+
+    ICE_RISK = 0x001
+    #: The vendor lists two humidity alarms (codes 7 and 8) and gives both
+    #: the same description, without saying what tells them apart.
+    HUMIDITY_1 = 0x002
+    HUMIDITY_2 = 0x004
+    TEMPERATURE_DELTA = 0x008
+    CO2_OVER_LIMIT = 0x010
+    FILTER = 0x020
+    #: Code 12 in the vendor's table, whose description column is empty.
+    UNDOCUMENTED_12 = 0x040
+    #: Not a fault: the machine reports that it went into free cooling by
+    #: itself. It sits in the alarm bitmap all the same.
+    FREE_COOLING_AUTO = 0x080
+    VOC_OVER_LIMIT = 0x100
+
+
+#: Bits that mean something is wrong. Free cooling is a state, not a fault,
+#: and the undocumented bits are left out on purpose: the only one ever seen
+#: on a real unit, 0x0000000C00000000, lasted two seconds while the fans were
+#: spinning up, so treating unknown bits as faults would fire a notification
+#: at every start.
+FAULT_MASK = (
+    Alarm.ICE_RISK
+    | Alarm.HUMIDITY_1
+    | Alarm.HUMIDITY_2
+    | Alarm.TEMPERATURE_DELTA
+    | Alarm.CO2_OVER_LIMIT
+    | Alarm.FILTER
+    | Alarm.VOC_OVER_LIMIT
+)
 
 
 class Command(IntEnum):

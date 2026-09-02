@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from .const import (
+    FAULT_MASK,
     FILTER_M3_PER_COUNT,
     FILTER_MIN_LEN,
     IDX_ALARMS,
@@ -20,6 +21,7 @@ from .const import (
     LAST_STATUS_MAP,
     SCALE,
     TELEMETRY_MIN_LEN,
+    Alarm,
     VmcMode,
 )
 from .exceptions import HeltyCloudNoDataError
@@ -92,9 +94,25 @@ class HeltyState:
         return self.mode is not VmcMode.OFF
 
     @property
+    def alarm_flags(self) -> Alarm | None:
+        """Decode the alarm bitmap, or None when there is no raw telemetry."""
+        if not self.alarms:
+            return None
+        try:
+            return Alarm(int(self.alarms, 16))
+        except ValueError:
+            return None
+
+    @property
     def has_alarm(self) -> bool:
-        """True when the alarm bitmap has at least one bit set."""
-        return bool(self.alarms) and set(self.alarms or "") != {"0"}
+        """True when the machine reports a fault.
+
+        Only the documented fault bits count: free cooling reports itself in
+        the same bitmap without anything being wrong, and the undocumented
+        bits carry at least one start-up transient.
+        """
+        flags = self.alarm_flags
+        return flags is not None and bool(flags & FAULT_MASK)
 
     @classmethod
     def from_last_status(cls, rows: list[dict[str, Any]]) -> HeltyState:
