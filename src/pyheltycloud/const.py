@@ -46,10 +46,11 @@ class Alarm(IntFlag):
     """
 
     ICE_RISK = 0x001
-    #: The vendor lists two humidity alarms (codes 7 and 8) and gives both
-    #: the same description, without saying what tells them apart.
-    HUMIDITY_1 = 0x002
-    HUMIDITY_2 = 0x004
+    #: High indoor humidity. The board raises it on two bits (codes 7 and 8)
+    #: that only its own humidity algorithm tells apart; the vendor says to
+    #: treat them as one alarm. Either bit is enough, so test it with
+    #: ``flags & Alarm.HUMIDITY``: ``in`` would want both.
+    HUMIDITY = 0x006
     TEMPERATURE_DELTA = 0x008
     CO2_OVER_LIMIT = 0x010
     FILTER = 0x020
@@ -68,8 +69,7 @@ class Alarm(IntFlag):
 #: at every start.
 FAULT_MASK = (
     Alarm.ICE_RISK
-    | Alarm.HUMIDITY_1
-    | Alarm.HUMIDITY_2
+    | Alarm.HUMIDITY
     | Alarm.TEMPERATURE_DELTA
     | Alarm.CO2_OVER_LIMIT
     | Alarm.FILTER
@@ -144,9 +144,9 @@ IDX_HUMIDITY = 10
 TELEMETRY_MIN_LEN = IDX_HUMIDITY + 1
 
 # Optional sensors, absent on most units: they read 0 when not installed.
-# The vendor calls them "A: anidride CO2" and "I: isobutene VOC" and gives
-# no unit, and this panel has neither, so the values are passed on as they
-# arrive rather than scaled on a guess.
+# Both are passed on unscaled, as the vendor specifies: CO2 (register 1005,
+# CO2Probe) in ppm, VOC (register 1015, Voc) as a VOC index that the firmware
+# thresholds as ppb.
 IDX_CO2 = 14
 IDX_VOC = 15
 SENSOR_MIN_LEN = IDX_VOC + 1
@@ -159,10 +159,9 @@ IDX_FILTER_PARTIAL = 16
 IDX_FILTER_TOTAL = 18
 FILTER_MIN_LEN = IDX_FILTER_TOTAL + 1
 
-#: Cubic metres per count. The vendor wrote "10e-1 mc", but the measured
-#: rates only make sense at ten: over 475 hours at speed 1 the counter grew
-#: 0.73 per hour, that is 7.3 m3/h, while a tenth of a cubic metre per count
-#: would mean 0.073 m3/h out of a machine rated for tens.
+#: Cubic metres per count. The register is "mc/10": the vendor confirmed
+#: that it holds tens of cubic metres, which matches the measured rates
+#: (0.73 counts per hour at speed 1, that is 7.3 m3/h).
 FILTER_M3_PER_COUNT = 10
 
 #: Cubic metres after which the panel shows the filter alarm. The vendor

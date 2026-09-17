@@ -83,10 +83,10 @@ class HeltyState:
     """Hex alarm bitmap; "0000000000000000" means no alarms."""
 
     co2: int | None = None
-    """CO2 reading, None when the sensor is not installed. Unit unknown."""
+    """CO2 in ppm, None when the sensor is not installed."""
 
     voc: int | None = None
-    """VOC reading, None when the sensor is not installed. Unit unknown."""
+    """VOC index (thresholded as ppb), None when the sensor is not installed."""
 
     filter_partial_m3: int | None = None
     """Cubic metres treated since the last filter reset."""

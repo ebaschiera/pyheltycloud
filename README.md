@@ -23,6 +23,7 @@ pip install pyheltycloud
 import asyncio
 from pyheltycloud import HeltyCloud, VmcMode
 
+
 async def main() -> None:
     async with HeltyCloud("me@example.com", "password") as helty:
         for device in await helty.get_devices():
@@ -34,6 +35,7 @@ async def main() -> None:
 
             # set_mode_verified() re-reads the state and resends if the command is lost.
             await helty.set_mode_verified(device, VmcMode.SPEED_2)
+
 
 asyncio.run(main())
 ```
@@ -70,12 +72,11 @@ for callers that would rather pay a round trip than miss a command.
 
 | | |
 |---|---|
-| Reading | devices, mode, indoor and outdoor temperature, humidity, CO2 and VOC where installed, both fan percentages, alarms as named flags, the two counters of treated air |
+| Reading | devices, mode, indoor and outdoor temperature, humidity, CO2 (ppm) and VOC (VOC index) where installed, both fan percentages, alarms as named flags, the two counters of treated air in m³ |
 | Writing | all modes (off, speeds 1-4, night, hyperventilation, free cooling), optionally with verification and retries; report request |
 | Not mapped yet | commands that carry an argument: the API refuses every shape tried. The brightness level, the one argument worth having, belongs to the Elite version's lights, so a FlowPLUS may have nothing here |
 | Not mapped yet | the filter reset: the vendor gives command 37, unverified, and sending it would destroy the only record of how old the filter is |
 | Not available | whether the panel is lit, and whether Auto is on: 40, 41, 38 and 39 take effect, but the vendor states this generation of machines cannot report either state |
-| Not available | the unit of the CO2 and VOC readings, undocumented and untestable on a unit that has neither sensor |
 | Not available | the alarm threshold of the filter — 90000 m³ on the current firmware, by the vendor's word, and in none of the values the board reports |
 
 ## Development

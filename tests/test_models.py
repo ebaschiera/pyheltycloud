@@ -154,6 +154,15 @@ def test_alarm_flags() -> None:
     assert HeltyState(mode=VmcMode.NIGHT, alarms="not hex").alarm_flags is None
 
 
+def test_either_humidity_bit_is_the_humidity_alarm() -> None:
+    """The board uses two bits for high humidity; the vendor says they are one alarm."""
+    for alarms in ("0000000000000002", "0000000000000004"):
+        state = HeltyState(mode=VmcMode.SPEED_1, alarms=alarms)
+        assert state.alarm_flags is not None
+        assert state.alarm_flags & Alarm.HUMIDITY
+        assert state.has_alarm
+
+
 def test_free_cooling_bit_is_not_a_fault() -> None:
     """The machine reports automatic free cooling in the alarm bitmap."""
     state = HeltyState(mode=VmcMode.FREE_COOLING, alarms="0000000000000080")
