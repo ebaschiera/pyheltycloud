@@ -24,6 +24,7 @@ from .conftest import (
     SERIAL,
     FakeCloud,
     Raw,
+    make_id_token,
     srp_login_replies,
 )
 
@@ -304,6 +305,34 @@ async def test_login_authenticates_when_no_tokens(cloud: FakeCloud, client: Helt
     cloud.reply(EP_INSTALLATIONS, [])
     await client.get_devices()
     assert cloud.last(EP_INSTALLATIONS).headers["Authorization"] == "Bearer fresh-id"
+
+
+async def test_user_id_is_the_cognito_subject(cloud: FakeCloud, client: HeltyCloud) -> None:
+    client._tokens = None
+    sub = "00000000-1111-2222-3333-444444444444"
+    cloud.reply_sequence(
+        COGNITO_PATH, srp_login_replies(make_id_token({"sub": sub, "email": "user@example.com"}))
+    )
+    await client.login()
+    assert client.user_id == sub
+
+
+async def test_user_id_before_login(client: HeltyCloud) -> None:
+    client._tokens = None
+    with pytest.raises(HeltyCloudError, match="login"):
+        client.user_id  # noqa: B018
+
+
+@pytest.mark.parametrize(
+    "id_token",
+    ["id-token", "a.!!!.c", make_id_token({"email": "user@example.com"}), "a.WzFd.c"],
+    ids=["not-a-jwt", "bad-base64", "no-sub", "not-an-object"],
+)
+async def test_user_id_from_an_unreadable_token(client: HeltyCloud, id_token: str) -> None:
+    assert client._tokens is not None
+    client._tokens.id_token = id_token
+    with pytest.raises(HeltyCloudAuthError):
+        client.user_id  # noqa: B018
 
 
 async def test_relogin_when_refresh_token_rejected(cloud: FakeCloud, client: HeltyCloud) -> None:

@@ -68,6 +68,9 @@ for callers that would rather pay a round trip than miss a command.
 **Two different serials.** Reads use `device.serial_number` (the machine), writes use
 `device.board_serial` (the board). They are not interchangeable.
 
+**The account has an id.** `user_id` is the Cognito `sub` of the account, available once logged
+in. The email is only a login alias and can change; the id does not.
+
 ## What is covered
 
 | | |

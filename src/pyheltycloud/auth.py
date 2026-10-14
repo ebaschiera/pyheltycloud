@@ -119,6 +119,20 @@ class Tokens:
         """True when it is time to renew before the next call."""
         return time.time() >= self.expires_at - _EXPIRY_MARGIN
 
+    @property
+    def user_id(self) -> str:
+        """The account's Cognito ``sub``, read from the ID token.
+
+        The signature is not checked: the token comes straight from Cognito
+        over TLS, and only its claims are of interest here.
+        """
+        try:
+            payload = self.id_token.split(".")[1]
+            claims = json.loads(base64.urlsafe_b64decode(payload + "=" * (-len(payload) % 4)))
+            return str(claims["sub"])
+        except (IndexError, KeyError, TypeError, ValueError) as err:
+            raise HeltyCloudAuthError("Cognito returned an ID token without a subject") from err
+
 
 class CognitoSrpAuth:
     """SRP login and token renewal against a Cognito user pool."""

@@ -7,6 +7,8 @@ full HTTP path is exercised, headers included.
 
 from __future__ import annotations
 
+import base64
+import json
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -78,6 +80,15 @@ class FakeCloud:
         if isinstance(payload, Raw):
             return web.Response(text=payload.text, status=status, content_type=payload.content_type)
         return web.json_response(payload, status=status)
+
+
+def make_id_token(claims: dict[str, Any]) -> str:
+    """Build an unsigned JWT carrying the given claims."""
+
+    def part(data: dict[str, Any]) -> str:
+        return base64.urlsafe_b64encode(json.dumps(data).encode()).rstrip(b"=").decode()
+
+    return f"{part({'alg': 'RS256'})}.{part(claims)}.signature"
 
 
 def srp_login_replies(id_token: str) -> list[tuple[int, Any]]:

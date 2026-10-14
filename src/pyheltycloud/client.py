@@ -119,6 +119,18 @@ class HeltyCloud:
         _, auth = self._ensure_started()
         self._tokens = await auth.authenticate(self._email, self._password)
 
+    @property
+    def user_id(self) -> str:
+        """Identifier of the account, stable across email changes.
+
+        It is the Cognito ``sub``: the email is only a login alias of the
+        pool, so it can change while this stays the same. Available once
+        logged in, after login() or any other call.
+        """
+        if self._tokens is None:
+            raise HeltyCloudError("Not logged in: call login() first")
+        return self._tokens.user_id
+
     async def _id_token(self) -> str:
         """Return a valid token, renewing it or logging in again if needed."""
         _, auth = self._ensure_started()
