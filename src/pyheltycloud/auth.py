@@ -26,6 +26,19 @@ import aiohttp
 
 from .exceptions import HeltyCloudAuthError, HeltyCloudConnectionError
 
+#: Cognito errors that mean the credentials themselves were refused. Anything
+#: else it answers with, like throttling or its own internal errors, is a
+#: passing failure: reporting it as bad credentials would send the user to
+#: re-enter a password that is still right.
+CREDENTIAL_ERRORS = frozenset(
+    {
+        "NotAuthorizedException",
+        "PasswordResetRequiredException",
+        "UserNotConfirmedException",
+        "UserNotFoundException",
+    }
+)
+
 # 3072-bit prime and generator, fixed by the Cognito protocol.
 N_HEX = (
     "FFFFFFFFFFFFFFFFC90FDAA22168C234C4C6628B80DC1CD129024E088A67CC74"
@@ -195,8 +208,11 @@ class CognitoSrpAuth:
             raise HeltyCloudConnectionError(f"{target}: unexpected answer {text[:200]}")
 
         if status != 200:
-            message = body.get("message") or body.get("__type") or str(body)
-            raise HeltyCloudAuthError(f"{target}: {message}")
+            error_type = str(body.get("__type", "")).rpartition("#")[2]
+            message = body.get("message") or error_type or str(body)
+            if error_type in CREDENTIAL_ERRORS:
+                raise HeltyCloudAuthError(f"{target}: {message}")
+            raise HeltyCloudConnectionError(f"{target}: {message}")
         return body
 
     def _password_key(self, username: str, password: str, srp_b_hex: str, salt_hex: str) -> bytes:

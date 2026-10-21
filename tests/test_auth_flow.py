@@ -94,6 +94,38 @@ async def test_wrong_password_is_auth_error(auth: CognitoSrpAuth, cloud: FakeClo
         await auth.authenticate("user@example.com", "wrong")
 
 
+@pytest.mark.parametrize(
+    ("status", "error_type"),
+    [
+        (400, "TooManyRequestsException"),
+        (400, "LimitExceededException"),
+        (500, "InternalErrorException"),
+        (500, "com.amazonaws.cognito#InternalErrorException"),
+    ],
+)
+async def test_passing_cognito_failure_is_not_an_auth_error(
+    auth: CognitoSrpAuth, cloud: FakeCloud, status: int, error_type: str
+) -> None:
+    """Throttling or an outage must not look like a wrong password."""
+    cloud.reply_sequence(
+        COGNITO_PATH, [(200, CHALLENGE), (status, {"__type": error_type, "message": "busy"})]
+    )
+    with pytest.raises(HeltyCloudConnectionError, match="busy"):
+        await auth.authenticate("user@example.com", "secret")
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    ["UserNotFoundException", "PasswordResetRequiredException", "UserNotConfirmedException"],
+)
+async def test_refused_account_is_auth_error(
+    auth: CognitoSrpAuth, cloud: FakeCloud, error_type: str
+) -> None:
+    cloud.reply(COGNITO_PATH, {"__type": error_type, "message": "refused"}, status=400)
+    with pytest.raises(HeltyCloudAuthError, match="refused"):
+        await auth.authenticate("user@example.com", "secret")
+
+
 async def test_unexpected_challenge(auth: CognitoSrpAuth, cloud: FakeCloud) -> None:
     """Should they ever enable MFA, better a clear error."""
     cloud.reply(COGNITO_PATH, {"ChallengeName": "SMS_MFA", "ChallengeParameters": {}})

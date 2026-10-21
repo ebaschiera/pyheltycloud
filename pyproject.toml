@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pyheltycloud"
-version = "0.2.0"
+version = "0.2.1"
 description = "Async client for the Helty cloud (hcloud) of Helty Flow VMC units"
 readme = "README.md"
 requires-python = ">=3.12"
