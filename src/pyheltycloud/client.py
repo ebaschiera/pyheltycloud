@@ -203,6 +203,20 @@ class HeltyCloud:
         self, serial_number: str, hours: int = DEFAULT_HISTORY_HOURS
     ) -> HeltyState:
         """Last state from the raw history: includes fans and alarms."""
+        return (await self._newest_telemetry(serial_number, hours))[0]
+
+    async def _newest_telemetry(
+        self, serial_number: str, hours: int = DEFAULT_HISTORY_HOURS
+    ) -> list[HeltyState]:
+        """Every telemetry that carries the newest timestamp, in cloud order.
+
+        The cloud stamps the history to the second and gives the rows no id,
+        and the board answers a command with two telemetries, one of its own
+        and one for the refresh that follows: when they land in the same
+        second there is no telling which came last. They normally agree, but
+        a board that drops a command can leave one with the new mode and one
+        with the old, so callers that confirm a command must see them all.
+        """
         now = int(time.time() * 1000)
         page = await self._post(
             EP_COMMAND_LOGS,
@@ -226,8 +240,12 @@ class HeltyCloud:
         # The cloud happens to return the newest first, but nothing documents
         # it, and update() decides whether the board answered by comparing
         # timestamps: pick the newest explicitly.
-        newest = max(rows, key=lambda row: row.get("timestamp") or 0)
-        return HeltyState.from_telemetry(newest["data"], newest.get("timestamp"))
+        newest = max(row.get("timestamp") or 0 for row in rows)
+        return [
+            HeltyState.from_telemetry(row["data"], row.get("timestamp"))
+            for row in rows
+            if (row.get("timestamp") or 0) == newest
+        ]
 
     async def update(self, device: HeltyDevice) -> HeltyState:
         """Fetch the current state: ask the board to report, then read.
@@ -238,8 +256,12 @@ class HeltyCloud:
         data, and raises HeltyCloudNoDataError only if there is nothing
         to read at all.
         """
+        return (await self._update(device))[0]
+
+    async def _update(self, device: HeltyDevice) -> list[HeltyState]:
+        """update(), returning every telemetry that shares the newest timestamp."""
         try:
-            last = await self.get_last_telemetry(device.serial_number)
+            last = await self._newest_telemetry(device.serial_number)
         except HeltyCloudNoDataError:
             last = None
 
@@ -250,11 +272,11 @@ class HeltyCloud:
         while loop.time() < deadline:
             await asyncio.sleep(REFRESH_POLL_INTERVAL)
             try:
-                state = await self.get_last_telemetry(device.serial_number)
+                states = await self._newest_telemetry(device.serial_number)
             except HeltyCloudNoDataError:
                 continue
-            if last is None or (state.timestamp or 0) > (last.timestamp or 0):
-                return state
+            if last is None or (states[0].timestamp or 0) > (last[0].timestamp or 0):
+                return states
 
         if last is not None:
             _LOGGER.debug(
@@ -303,9 +325,11 @@ class HeltyCloud:
         """
         for attempt in range(1, attempts + 1):
             await self.set_mode(device.board_serial, mode)
-            state = await self.update(device)
-            if state.mode is mode:
-                return state
+            states = await self._update(device)
+            # A single telemetry with the old mode in the newest second means
+            # the board may not have applied the command: resend it.
+            if all(state.mode is mode for state in states):
+                return states[0]
             _LOGGER.debug(
                 "Command %s not applied by %s (attempt %d/%d)",
                 mode.name,

@@ -279,6 +279,77 @@ async def test_set_mode_verified_gives_up(
         await client.set_mode_verified(device, VmcMode.NIGHT, attempts=2)
 
 
+def _tied_reply(timestamp: int, *payloads: list[Any]) -> tuple[int, Any]:
+    """Telemetries the cloud stamped with the same second."""
+    return (
+        200,
+        {"data": [{"commandId": 0, "timestamp": timestamp, "data": data} for data in payloads]},
+    )
+
+
+async def test_get_last_telemetry_with_tied_rows_keeps_cloud_order(
+    client: HeltyCloud, cloud: FakeCloud, telemetry: list[Any]
+) -> None:
+    """Polling still reads the first of the telemetries sharing the newest second."""
+    other = telemetry.copy()
+    other[1] = int(VmcMode.SPEED_4)
+    cloud.reply("/log/commandlogs/search", _tied_reply(7, telemetry, other)[1])
+    state = await client.get_last_telemetry(SERIAL)
+    assert state.mode is VmcMode.NIGHT
+
+
+async def test_set_mode_verified_resends_on_disagreeing_tie(
+    client: HeltyCloud,
+    cloud: FakeCloud,
+    installation: dict[str, Any],
+    telemetry: list[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A tie between the new mode and the old one does not confirm the command.
+
+    Seen on a live board: asked for a new speed seconds after the previous
+    one, it kept the old speed but left two telemetries in the same second,
+    the first with the new mode and the second with the old.
+    """
+    monkeypatch.setattr("pyheltycloud.client.REFRESH_TIMEOUT", 0)
+    ignored = telemetry.copy()
+    ignored[1] = int(VmcMode.SPEED_4)
+    cloud.reply(EP_INSTALLATIONS, [installation])
+    cloud.reply_sequence(
+        "/log/commandlogs/search",
+        [_tied_reply(1, telemetry, ignored), _tied_reply(2, telemetry, telemetry)],
+    )
+    device = (await client.get_devices())[0]
+    state = await client.set_mode_verified(device, VmcMode.NIGHT)
+
+    assert state.mode is VmcMode.NIGHT
+    assert state.timestamp == 2
+    night_commands = [
+        r for r in cloud.requests if r.path == SEND_PATH and r.json["commandId"] == Command.NIGHT
+    ]
+    assert len(night_commands) == 2
+
+
+async def test_set_mode_verified_accepts_agreeing_tie(
+    client: HeltyCloud,
+    cloud: FakeCloud,
+    installation: dict[str, Any],
+    telemetry: list[Any],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The usual pair of telemetries in the same second confirms at once."""
+    monkeypatch.setattr("pyheltycloud.client.REFRESH_TIMEOUT", 0)
+    cloud.reply(EP_INSTALLATIONS, [installation])
+    cloud.reply("/log/commandlogs/search", _tied_reply(1, telemetry, telemetry)[1])
+    device = (await client.get_devices())[0]
+    await client.set_mode_verified(device, VmcMode.NIGHT)
+
+    night_commands = [
+        r for r in cloud.requests if r.path == SEND_PATH and r.json["commandId"] == Command.NIGHT
+    ]
+    assert len(night_commands) == 1
+
+
 def test_constructor_needs_no_event_loop() -> None:
     """The constructor must not touch aiohttp: the session is born on first use."""
     helty = HeltyCloud("user@example.com", "secret")
