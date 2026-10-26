@@ -51,9 +51,16 @@ REFRESH_TIMEOUT = 15.0
 #: always find something without asking the cloud to scan a long window.
 DEFAULT_HISTORY_HOURS = 2
 
-#: Rows to ask for. Only the newest is used; a few spare ones cover the
-#: acks and other commands that share the history.
-HISTORY_PAGE_SIZE = 5
+#: How long to wait before reading the history once more to confirm a
+#: command. The two telemetries that answer a command can share a second
+#: and need not become visible together: a second read lets the late one
+#: show up.
+CONFIRM_SETTLE_DELAY = 2.0
+
+#: Rows to ask for. Only the newest second is used, but it can hold the
+#: acks of the commands next to two telemetries: a command sent seconds
+#: after another left five rows in a row on a live board.
+HISTORY_PAGE_SIZE = 10
 
 
 class HeltyCloud:
@@ -85,6 +92,7 @@ class HeltyCloud:
         )
         self._tokens: Tokens | None = None
         self._lock = asyncio.Lock()
+        self._command_locks: dict[str, asyncio.Lock] = {}
 
     def _ensure_started(self) -> tuple[aiohttp.ClientSession, CognitoSrpAuth]:
         """Session and auth, created lazily inside the current event loop."""
@@ -256,15 +264,32 @@ class HeltyCloud:
         data, and raises HeltyCloudNoDataError only if there is nothing
         to read at all.
         """
-        return (await self._update(device))[0]
-
-    async def _update(self, device: HeltyDevice) -> list[HeltyState]:
-        """update(), returning every telemetry that shares the newest timestamp."""
         try:
-            last = await self._newest_telemetry(device.serial_number)
+            last: HeltyState | None = await self.get_last_telemetry(device.serial_number)
         except HeltyCloudNoDataError:
             last = None
 
+        states = await self._fresh_telemetry(device, after=_timestamp(last))
+        if states is not None:
+            return states[0]
+        if last is not None:
+            _LOGGER.debug(
+                "Board %s did not answer the refresh: using the last known data",
+                device.serial_number,
+            )
+            return last
+        raise HeltyCloudNoDataError(
+            f"No telemetry for {device.serial_number}, even after a refresh"
+        )
+
+    async def _fresh_telemetry(
+        self, device: HeltyDevice, after: int | None
+    ) -> list[HeltyState] | None:
+        """Ask the board to report and wait for a second newer than `after`.
+
+        `after` None accepts any telemetry. Returns None if nothing newer
+        arrives within REFRESH_TIMEOUT.
+        """
         await self.refresh(device.board_serial)
 
         loop = asyncio.get_running_loop()
@@ -275,18 +300,9 @@ class HeltyCloud:
                 states = await self._newest_telemetry(device.serial_number)
             except HeltyCloudNoDataError:
                 continue
-            if last is None or (states[0].timestamp or 0) > (last[0].timestamp or 0):
+            if after is None or (_timestamp(states[0]) or 0) > after:
                 return states
-
-        if last is not None:
-            _LOGGER.debug(
-                "Board %s did not answer the refresh: using the last known data",
-                device.serial_number,
-            )
-            return last
-        raise HeltyCloudNoDataError(
-            f"No telemetry for {device.serial_number}, even after a refresh"
-        )
+        return None
 
     # -- writing -----------------------------------------------------------
 
@@ -322,19 +338,47 @@ class HeltyCloud:
 
         Returns the state reflecting the requested mode. Raises
         HeltyCloudError if after `attempts` sends the VMC has not applied it.
+
+        Only telemetry newer than what the history held before the send
+        counts, and every telemetry of its second must carry the mode, on
+        two reads CONFIRM_SETTLE_DELAY apart: an old report, or one half of
+        a pair that disagrees, says nothing about this command. Calls for
+        the same board run one at a time, so the retries of an older call
+        never land after a newer command.
         """
-        for attempt in range(1, attempts + 1):
-            await self.set_mode(device.board_serial, mode)
-            states = await self._update(device)
-            # A single telemetry with the old mode in the newest second means
-            # the board may not have applied the command: resend it.
-            if all(state.mode is mode for state in states):
-                return states[0]
-            _LOGGER.debug(
-                "Command %s not applied by %s (attempt %d/%d)",
-                mode.name,
-                device.serial_number,
-                attempt,
-                attempts,
-            )
+        lock = self._command_locks.setdefault(device.board_serial, asyncio.Lock())
+        async with lock:
+            try:
+                seen = _timestamp(await self.get_last_telemetry(device.serial_number))
+            except HeltyCloudNoDataError:
+                seen = None
+
+            for attempt in range(1, attempts + 1):
+                await self.set_mode(device.board_serial, mode)
+                states = await self._fresh_telemetry(device, after=seen)
+                if states is not None:
+                    seen = _timestamp(states[0])
+                    if _all_in_mode(states, mode):
+                        await asyncio.sleep(CONFIRM_SETTLE_DELAY)
+                        states = await self._newest_telemetry(device.serial_number)
+                        seen = _timestamp(states[0])
+                        if _all_in_mode(states, mode):
+                            return states[0]
+                _LOGGER.debug(
+                    "Command %s not confirmed by %s (attempt %d/%d)",
+                    mode.name,
+                    device.serial_number,
+                    attempt,
+                    attempts,
+                )
         raise HeltyCloudError(f"The VMC did not apply mode {mode.name} after {attempts} attempts")
+
+
+def _timestamp(state: HeltyState | None) -> int | None:
+    """Timestamp of a state, None when there is no state."""
+    return None if state is None else state.timestamp or 0
+
+
+def _all_in_mode(states: list[HeltyState], mode: VmcMode) -> bool:
+    """Whether every telemetry of a second reports the mode."""
+    return all(state.mode is mode for state in states)

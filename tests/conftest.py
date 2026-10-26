@@ -10,7 +10,7 @@ from __future__ import annotations
 import base64
 import json
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -64,6 +64,10 @@ class FakeCloud:
         """
         self.responses[path] = list(replies)  # type: ignore[assignment]
 
+    def reply_with(self, path: str, handler: Callable[[Any], tuple[int, Any]]) -> None:
+        """Compute each response from the request body, for stateful fakes."""
+        self.responses[path] = handler  # type: ignore[assignment]
+
     def last(self, path: str) -> Recorded:
         matching = [r for r in self.requests if r.path == path]
         assert matching, f"no request to {path}; seen: {[r.path for r in self.requests]}"
@@ -73,7 +77,9 @@ class FakeCloud:
         body = await request.json() if request.body_exists else None
         self.requests.append(Recorded(request.method, request.path, body, dict(request.headers)))
         entry = self.responses.get(request.path, (200, {}))
-        if isinstance(entry, list):
+        if callable(entry):
+            status, payload = entry(body)
+        elif isinstance(entry, list):
             status, payload = entry.pop(0) if entry else (200, {})
         else:
             status, payload = entry

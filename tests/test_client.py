@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -16,7 +18,7 @@ from pyheltycloud import (
     HeltyCloudNoDataError,
     VmcMode,
 )
-from pyheltycloud.const import EP_COMMAND_LOGS, EP_INSTALLATIONS, EP_LAST_STATUS
+from pyheltycloud.const import EP_COMMAND_LOGS, EP_INSTALLATIONS, EP_LAST_STATUS, MODE_COMMANDS
 
 from .conftest import (
     BOARD_SERIAL,
@@ -231,60 +233,74 @@ async def test_update_without_any_telemetry(
         await client.update(device)
 
 
-async def test_set_mode_verified_retries_lost_command(
-    client: HeltyCloud,
-    cloud: FakeCloud,
-    installation: dict[str, Any],
-    telemetry: list[Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A command lost by the cloud is resent until the state reflects it."""
-    # Timeout 0: update() only reads the history, without waiting, so the
-    # test controls exactly which telemetry each attempt sees.
-    monkeypatch.setattr("pyheltycloud.client.REFRESH_TIMEOUT", 0)
-    ignored = telemetry.copy()
-    ignored[1] = int(VmcMode.SPEED_2)
-    cloud.reply(EP_INSTALLATIONS, [installation])
-    cloud.reply_sequence(
-        "/log/commandlogs/search",
-        [_search_reply(1, ignored), _search_reply(2, telemetry)],
-    )
-    device = (await client.get_devices())[0]
-    state = await client.set_mode_verified(device, VmcMode.NIGHT)
+class FakeBoard:
+    """A panel behind the fake cloud, with a history that moves.
 
-    assert state.mode is VmcMode.NIGHT
-    night_commands = [
-        r for r in cloud.requests if r.path == SEND_PATH and r.json["commandId"] == Command.NIGHT
-    ]
-    assert len(night_commands) == 2
+    Every mode command leaves its ack and then its telemetries in the
+    history the way a live board does, one clock tick (a second for the
+    cloud) per command, and a refresh adds a telemetry with the current
+    mode. Tests script the misbehaviour through `on_mode`, which returns
+    the modes of the telemetries a mode command leaves (empty: the command
+    is lost), through `answers_refresh`, and through `delayed`: rows that
+    become visible only on the read after the one they were added for.
+    """
+
+    def __init__(self, cloud: FakeCloud, telemetry: list[Any], mode: VmcMode) -> None:
+        """Take over the command and history paths of the fake cloud."""
+        self.telemetry = telemetry
+        self.mode = mode
+        self.clock = 0
+        self.rows: list[dict[str, Any]] = []
+        self.delayed: list[dict[str, Any]] = []
+        self.answers_refresh = True
+        self.on_mode: Callable[[VmcMode], list[VmcMode]] = self.apply
+        self.sent: list[int] = []
+        cloud.reply_with(SEND_PATH, self._command)
+        cloud.reply_with("/log/commandlogs/search", self._search)
+
+    def apply(self, mode: VmcMode) -> list[VmcMode]:
+        """Default behaviour: switch mode and report it once."""
+        self.mode = mode
+        return [mode]
+
+    def row(self, mode: VmcMode) -> dict[str, Any]:
+        data = self.telemetry.copy()
+        data[1] = int(mode)
+        return {"commandId": 0, "timestamp": self.clock, "data": data}
+
+    def _command(self, body: Any) -> tuple[int, Any]:
+        command = body["commandId"]
+        self.sent.append(command)
+        if command == Command.GET_STATUS:
+            if self.answers_refresh:
+                self.rows.append(self.row(self.mode))
+            return (200, {})
+        self.clock += 1
+        self.rows.append({"commandId": command, "timestamp": self.clock, "data": []})
+        mode = next(m for m, c in MODE_COMMANDS.items() if c == command)
+        self.rows.extend(self.row(m) for m in self.on_mode(mode))
+        return (200, {})
+
+    def _search(self, body: Any) -> tuple[int, Any]:
+        visible = list(self.rows)
+        # Rows held back on this read join the history for the next one.
+        self.rows.extend(self.delayed)
+        self.delayed = []
+        newest_first = sorted(visible, key=lambda row: -row["timestamp"])
+        return (200, {"data": newest_first[: body["pageSize"]]})
 
 
-async def test_set_mode_verified_gives_up(
-    client: HeltyCloud,
-    cloud: FakeCloud,
-    installation: dict[str, Any],
-    telemetry: list[Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("pyheltycloud.client.REFRESH_TIMEOUT", 0)
-    ignored = telemetry.copy()
-    ignored[1] = int(VmcMode.SPEED_2)
-    cloud.reply(EP_INSTALLATIONS, [installation])
-    cloud.reply(
-        "/log/commandlogs/search",
-        {"data": [{"commandId": 0, "timestamp": 1, "data": ignored}]},
-    )
-    device = (await client.get_devices())[0]
-    with pytest.raises(HeltyCloudError, match="NIGHT"):
-        await client.set_mode_verified(device, VmcMode.NIGHT, attempts=2)
+def _lose_first(board: FakeBoard) -> Callable[[VmcMode], list[VmcMode]]:
+    """Drop the first mode command and apply the others."""
+    lost = [True]
 
+    def on_mode(mode: VmcMode) -> list[VmcMode]:
+        if lost:
+            lost.pop()
+            return []
+        return board.apply(mode)
 
-def _tied_reply(timestamp: int, *payloads: list[Any]) -> tuple[int, Any]:
-    """Telemetries the cloud stamped with the same second."""
-    return (
-        200,
-        {"data": [{"commandId": 0, "timestamp": timestamp, "data": data} for data in payloads]},
-    )
+    return on_mode
 
 
 async def test_get_last_telemetry_with_tied_rows_keeps_cloud_order(
@@ -293,61 +309,191 @@ async def test_get_last_telemetry_with_tied_rows_keeps_cloud_order(
     """Polling still reads the first of the telemetries sharing the newest second."""
     other = telemetry.copy()
     other[1] = int(VmcMode.SPEED_4)
-    cloud.reply("/log/commandlogs/search", _tied_reply(7, telemetry, other)[1])
+    cloud.reply(
+        "/log/commandlogs/search",
+        {"data": [{"commandId": 0, "timestamp": 7, "data": data} for data in (telemetry, other)]},
+    )
     state = await client.get_last_telemetry(SERIAL)
     assert state.mode is VmcMode.NIGHT
 
 
-async def test_set_mode_verified_resends_on_disagreeing_tie(
-    client: HeltyCloud,
-    cloud: FakeCloud,
-    installation: dict[str, Any],
-    telemetry: list[Any],
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """A tie between the new mode and the old one does not confirm the command.
+@pytest.fixture
+def fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    """No real waits, and a short deadline for a board that stays silent."""
+    monkeypatch.setattr("pyheltycloud.client.REFRESH_POLL_INTERVAL", 0)
+    monkeypatch.setattr("pyheltycloud.client.CONFIRM_SETTLE_DELAY", 0)
+    monkeypatch.setattr("pyheltycloud.client.REFRESH_TIMEOUT", 0.05)
 
-    Seen on a live board: asked for a new speed seconds after the previous
-    one, it kept the old speed but left two telemetries in the same second,
-    the first with the new mode and the second with the old.
-    """
-    monkeypatch.setattr("pyheltycloud.client.REFRESH_TIMEOUT", 0)
-    ignored = telemetry.copy()
-    ignored[1] = int(VmcMode.SPEED_4)
+
+async def _device(client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any]) -> Any:
     cloud.reply(EP_INSTALLATIONS, [installation])
-    cloud.reply_sequence(
-        "/log/commandlogs/search",
-        [_tied_reply(1, telemetry, ignored), _tied_reply(2, telemetry, telemetry)],
-    )
-    device = (await client.get_devices())[0]
+    return (await client.get_devices())[0]
+
+
+@pytest.mark.usefixtures("fast")
+async def test_set_mode_verified_confirms_at_once(
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
+) -> None:
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_1)
+    board.rows.append(board.row(VmcMode.SPEED_1))
+    device = await _device(client, cloud, installation)
+
     state = await client.set_mode_verified(device, VmcMode.NIGHT)
 
     assert state.mode is VmcMode.NIGHT
-    assert state.timestamp == 2
-    night_commands = [
-        r for r in cloud.requests if r.path == SEND_PATH and r.json["commandId"] == Command.NIGHT
-    ]
-    assert len(night_commands) == 2
+    assert board.sent.count(Command.NIGHT) == 1
 
 
+@pytest.mark.usefixtures("fast")
+async def test_set_mode_verified_with_empty_history(
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
+) -> None:
+    """With nothing in the history yet, the first report confirms."""
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_1)
+    device = await _device(client, cloud, installation)
+
+    state = await client.set_mode_verified(device, VmcMode.NIGHT)
+
+    assert state.mode is VmcMode.NIGHT
+    assert board.sent.count(Command.NIGHT) == 1
+
+
+@pytest.mark.usefixtures("fast")
+async def test_set_mode_verified_retries_lost_command(
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
+) -> None:
+    """A command lost on the way is resent until the board reports it."""
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_2)
+    board.rows.append(board.row(VmcMode.SPEED_2))
+    board.on_mode = _lose_first(board)
+    device = await _device(client, cloud, installation)
+
+    state = await client.set_mode_verified(device, VmcMode.NIGHT)
+
+    assert state.mode is VmcMode.NIGHT
+    assert board.sent.count(Command.NIGHT) == 2
+
+
+@pytest.mark.usefixtures("fast")
+async def test_set_mode_verified_gives_up(
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
+) -> None:
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_2)
+    board.rows.append(board.row(VmcMode.SPEED_2))
+    board.on_mode = lambda mode: []
+    device = await _device(client, cloud, installation)
+
+    with pytest.raises(HeltyCloudError, match="NIGHT"):
+        await client.set_mode_verified(device, VmcMode.NIGHT, attempts=2)
+    assert board.sent.count(Command.NIGHT) == 2
+
+
+@pytest.mark.usefixtures("fast")
+async def test_set_mode_verified_ignores_stale_history(
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
+) -> None:
+    """A history that already shows the mode does not confirm a lost command."""
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_4)
+    board.rows.append(board.row(VmcMode.SPEED_1))
+    board.on_mode = lambda mode: []
+    board.answers_refresh = False
+    device = await _device(client, cloud, installation)
+
+    with pytest.raises(HeltyCloudError, match="SPEED_1"):
+        await client.set_mode_verified(device, VmcMode.SPEED_1, attempts=2)
+
+
+@pytest.mark.usefixtures("fast")
+async def test_set_mode_verified_resends_on_disagreeing_tie(
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
+) -> None:
+    """A tie between the new mode and the old one does not confirm the command.
+
+    Seen on a live board: asked for speed 1 seconds after speed 4, it kept
+    speed 4 but left two telemetries in the same second, the first with the
+    new mode and the second with the old, and then stayed silent.
+    """
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_4)
+    board.rows.append(board.row(VmcMode.SPEED_4))
+    dropped = [True]
+
+    def drop_first(mode: VmcMode) -> list[VmcMode]:
+        if dropped:
+            dropped.pop()
+            return [mode, board.mode]
+        board.mode = mode
+        return [mode, mode]
+
+    board.on_mode = drop_first
+    board.answers_refresh = False
+    device = await _device(client, cloud, installation)
+
+    state = await client.set_mode_verified(device, VmcMode.SPEED_1)
+
+    assert state.mode is VmcMode.SPEED_1
+    assert board.sent.count(Command.SPEED_1) == 2
+
+
+@pytest.mark.usefixtures("fast")
+async def test_set_mode_verified_waits_for_the_late_half_of_a_tie(
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
+) -> None:
+    """The old-mode twin of a telemetry can show up a read later: no early yes."""
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_4)
+    board.rows.append(board.row(VmcMode.SPEED_4))
+    dropped = [True]
+
+    def drop_first_late(mode: VmcMode) -> list[VmcMode]:
+        if dropped:
+            dropped.pop()
+            board.delayed.append(board.row(board.mode))
+            return [mode]
+        return board.apply(mode)
+
+    board.on_mode = drop_first_late
+    board.answers_refresh = False
+    device = await _device(client, cloud, installation)
+
+    state = await client.set_mode_verified(device, VmcMode.SPEED_1)
+
+    assert state.mode is VmcMode.SPEED_1
+    assert board.sent.count(Command.SPEED_1) == 2
+
+
+@pytest.mark.usefixtures("fast")
 async def test_set_mode_verified_accepts_agreeing_tie(
-    client: HeltyCloud,
-    cloud: FakeCloud,
-    installation: dict[str, Any],
-    telemetry: list[Any],
-    monkeypatch: pytest.MonkeyPatch,
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
 ) -> None:
     """The usual pair of telemetries in the same second confirms at once."""
-    monkeypatch.setattr("pyheltycloud.client.REFRESH_TIMEOUT", 0)
-    cloud.reply(EP_INSTALLATIONS, [installation])
-    cloud.reply("/log/commandlogs/search", _tied_reply(1, telemetry, telemetry)[1])
-    device = (await client.get_devices())[0]
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_1)
+    board.rows.append(board.row(VmcMode.SPEED_1))
+    board.on_mode = lambda mode: [*board.apply(mode), mode]
+    device = await _device(client, cloud, installation)
+
     await client.set_mode_verified(device, VmcMode.NIGHT)
 
-    night_commands = [
-        r for r in cloud.requests if r.path == SEND_PATH and r.json["commandId"] == Command.NIGHT
-    ]
-    assert len(night_commands) == 1
+    assert board.sent.count(Command.NIGHT) == 1
+
+
+@pytest.mark.usefixtures("fast")
+async def test_set_mode_verified_serializes_commands_per_board(
+    client: HeltyCloud, cloud: FakeCloud, installation: dict[str, Any], telemetry: list[Any]
+) -> None:
+    """The retries of an older call never land after a newer command."""
+    board = FakeBoard(cloud, telemetry, VmcMode.SPEED_1)
+    board.rows.append(board.row(VmcMode.SPEED_1))
+    board.on_mode = _lose_first(board)
+    device = await _device(client, cloud, installation)
+
+    speed_4 = asyncio.create_task(client.set_mode_verified(device, VmcMode.SPEED_4))
+    await asyncio.sleep(0)
+    speed_1 = asyncio.create_task(client.set_mode_verified(device, VmcMode.SPEED_1))
+    await asyncio.gather(speed_4, speed_1)
+
+    first_speed_1 = board.sent.index(Command.SPEED_1)
+    assert Command.SPEED_4 not in board.sent[first_speed_1:]
+    assert board.sent.count(Command.SPEED_4) == 2
+    assert board.mode is VmcMode.SPEED_1
 
 
 def test_constructor_needs_no_event_loop() -> None:
